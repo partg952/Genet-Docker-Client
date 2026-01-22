@@ -6,6 +6,9 @@ It implements real-time container state tracking and basic container control wit
 This is not a wrapper around `docker ps`.  
 This is a true Docker Engine client.
 
+<img width="1919" height="1043" alt="image" src="https://github.com/user-attachments/assets/ac43b8a9-0ffa-4dad-a4b1-fd3275a7dde8" />
+
+
 ---
 
 ## Why Genet exists
