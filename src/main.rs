@@ -13,7 +13,7 @@ use crate::core::long_connection::EventsSocket;
 fn main() -> eframe::Result {
     let (tx , rx) = mpsc::channel::<DockerEvents>();
     let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_min_inner_size([400.0, 300.0]),
+        viewport: egui::ViewportBuilder::default().with_min_inner_size([400.0, 300.0]).with_icon(eframe::icon_data::from_png_bytes(&include_bytes!("../assets/logo.png")[..]).expect("failed to load icon")).with_app_id("com.parth.genet"),
         ..Default::default()
     };
     thread::spawn(move || {

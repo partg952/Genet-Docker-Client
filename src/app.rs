@@ -4,12 +4,19 @@ use crate::core::events::DockerEvents;
 use crate::core::parser::ContainerInfo;
 use crate::core::requests;
 use eframe::egui::panel::Side;
-use eframe::egui::{self, Id, Ui, vec2};
+use eframe::egui::{
+    self, Align, Color32, CornerRadius, Frame, Id, Layout, Margin, RichText, Stroke, Ui, vec2,
+};
+
+const SPACE_XS: f32 = 4.0;
+const SPACE_SM: f32 = 8.0;
+const SPACE_MD: f32 = 12.0;
 
 pub struct DockerApp {
     containers: Vec<ContainerInfo>,
     selected_container: Option<String>,
     rx: mpsc::Receiver<DockerEvents>,
+    theme_initialized: bool,
 }
 
 impl DockerApp {
@@ -19,232 +26,363 @@ impl DockerApp {
             containers: containers_list,
             selected_container: None,
             rx,
+            theme_initialized: false,
         }
     }
+
+    fn init_theme(&mut self, ctx: &egui::Context) {
+        if self.theme_initialized {
+            return;
+        }
+
+        let mut style = (*ctx.style()).clone();
+        style.spacing.item_spacing = vec2(SPACE_SM, SPACE_SM);
+        style.spacing.button_padding = vec2(10.0, 6.0);
+        style.spacing.window_margin = Margin::same(SPACE_MD as i8);
+        style.visuals = egui::Visuals::dark();
+        style.visuals.panel_fill = Color32::from_rgb(32, 35, 41);
+        style.visuals.extreme_bg_color = Color32::from_rgb(38, 42, 49);
+        style.visuals.widgets.inactive.bg_fill = Color32::from_rgb(53, 58, 66);
+        style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(58, 63, 72);
+        style.visuals.widgets.active.bg_fill = Color32::from_rgb(63, 69, 79);
+        style.visuals.window_corner_radius = CornerRadius::same(8);
+
+        ctx.set_style(style);
+        self.theme_initialized = true;
+    }
+
+    fn container_name(container: &ContainerInfo) -> String {
+        container
+            .names
+            .first()
+            .map(|name| name.trim_start_matches('/').to_string())
+            .unwrap_or_else(|| "Unnamed".to_string())
+    }
+
     fn filter_with_status_and_render(&mut self, status: &str, ui: &mut Ui) {
-        self.containers
+        for container in self
+            .containers
             .iter()
             .filter(|container| container.state == status)
-            .for_each(|container| {
-                let is_selected = self.selected_container == Some(container.id.clone());
-                let text = if is_selected {
-                    egui::RichText::new(container.names[0][1..].to_string())
-                        .size(16.0)
-                        .strong()
-                        .color(egui::Color32::WHITE)
-                } else {
-                    egui::RichText::new(container.names[0][1..].to_string()).size(16.0)
-                };
+        {
+            let is_selected = self
+                .selected_container
+                .as_ref()
+                .is_some_and(|id| id == &container.id);
 
-                let button_style = if is_selected {
-                    egui::Button::new(text).fill(egui::Color32::from_rgb(70, 130, 180))
-                } else {
-                    egui::Button::new(text)
-                };
+            let text = if is_selected {
+                RichText::new(Self::container_name(container))
+                    .size(14.0)
+                    .strong()
+                    .color(Color32::from_rgb(226, 231, 240))
+            } else {
+                RichText::new(Self::container_name(container))
+                    .size(14.0)
+                    .color(Color32::from_rgb(204, 210, 223))
+            };
 
-                let container_button = ui.add(
-                    button_style
-                        .wrap_mode(egui::TextWrapMode::Truncate)
-                        .min_size(vec2(200.0, 0.0)),
-                );
-                ui.add_space(8.0);
+            let button = if is_selected {
+                egui::Button::new(text)
+                    .fill(Color32::from_rgb(68, 76, 90))
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(92, 102, 120)))
+                    .corner_radius(CornerRadius::same(8))
+            } else {
+                egui::Button::new(text)
+                    .fill(Color32::from_rgb(49, 54, 63))
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(61, 67, 78)))
+                    .corner_radius(CornerRadius::same(8))
+            };
 
-                if container_button.hovered() {
-                    container_button.show_tooltip_text(container.names[0][1..].to_string());
-                }
-                if container_button.clicked() {
-                    self.selected_container = Some(container.id.clone());
-                }
-            });
+            let button_width = (ui.available_width() - SPACE_XS).max(180.0);
+            let response = ui.add_sized(
+                [button_width, 34.0],
+                button.wrap_mode(egui::TextWrapMode::Truncate),
+            );
+
+            if response.hovered() {
+                response
+                    .clone()
+                    .on_hover_text(Self::container_name(container));
+            }
+            if response.clicked() {
+                self.selected_container = Some(container.id.clone());
+            }
+
+            ui.add_space(SPACE_XS);
+        }
     }
+
     fn render_row_in_container_info(&self, ui: &mut Ui, field_name: &str, field_value: &str) {
-        ui.label(
-            egui::RichText::new(field_name)
-                .color(egui::Color32::LIGHT_GRAY)
-                .size(13.0),
+        ui.add(
+            egui::Label::new(
+                RichText::new(field_name)
+                    .color(Color32::from_rgb(149, 158, 176))
+                    .size(13.0),
+            )
+            .wrap_mode(egui::TextWrapMode::Truncate),
         );
-        ui.label(egui::RichText::new(field_value).strong().size(13.0));
+        ui.add(
+            egui::Label::new(
+                RichText::new(field_value)
+                    .strong()
+                    .size(13.0)
+                    .color(Color32::from_rgb(218, 224, 236)),
+            )
+            .wrap_mode(egui::TextWrapMode::Truncate),
+        );
         ui.end_row();
+    }
+
+    fn refresh_containers(&mut self) {
+        self.containers = requests::get_containers().unwrap();
+    }
+
+    fn state_color(state: &str) -> Color32 {
+        match state {
+            "running" => Color32::from_rgb(151, 176, 159),
+            "exited" => Color32::from_rgb(177, 155, 155),
+            _ => Color32::from_rgb(166, 173, 188),
+        }
+    }
+
+    fn render_state_badge(ui: &mut Ui, state: &str) {
+        Frame::new()
+            .fill(Color32::from_rgb(55, 60, 70))
+            .corner_radius(CornerRadius::same(6))
+            .inner_margin(Margin::symmetric(8, 4))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(state.to_ascii_uppercase())
+                        .size(11.0)
+                        .strong()
+                        .color(Self::state_color(state)),
+                );
+            });
     }
 }
 
 impl eframe::App for DockerApp {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+        self.init_theme(ctx);
+
         while let Ok(event) = self.rx.try_recv() {
-            println!("{:?}", event);
             match event {
                 DockerEvents::StartContainer(details) => {
-                    let targeted_container_option = self
+                    if let Some(targeted_container) = self
                         .containers
                         .iter_mut()
-                        .find(|container| container.id == details.container_id);
-                    if let Some(targeted_container) = targeted_container_option {
-                        targeted_container.state = "running".to_string()
+                        .find(|container| container.id == details.container_id)
+                    {
+                        targeted_container.state = "running".to_string();
                     }
                 }
                 DockerEvents::StopContainer(details) => {
-                    let targeted_container_option = self
+                    if let Some(targeted_container) = self
                         .containers
                         .iter_mut()
-                        .find(|container| container.id == details.container_id);
-                    if let Some(targeted_container) = targeted_container_option {
-                        targeted_container.state = "exited".to_string()
+                        .find(|container| container.id == details.container_id)
+                    {
+                        targeted_container.state = "exited".to_string();
                     }
                 }
                 _ => {}
             }
         }
+
         egui::SidePanel::new(Side::Left, Id::new("containers_list"))
             .exact_width(280.0)
             .resizable(false)
             .show_separator_line(true)
             .show(ctx, |ui| {
-                ui.add(egui::Label::new(
-                    egui::RichText::new(format!("📦 Containers ({})", self.containers.len()))
-                        .strong()
-                        .size(18.0),
-                ));
-                ui.separator();
-                ui.add_space(12.0);
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add_space(SPACE_SM);
+                        Frame::new()
+                            .fill(Color32::from_rgb(40, 44, 52))
+                            .corner_radius(CornerRadius::same(8))
+                            .inner_margin(Margin::same(10))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new("Containers")
+                                            .strong()
+                                            .size(18.0)
+                                            .color(Color32::from_rgb(224, 230, 242)),
+                                    );
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new(format!("{}", self.containers.len()))
+                                                    .size(12.0)
+                                                    .strong()
+                                                    .color(Color32::from_rgb(189, 197, 212)),
+                                            );
+                                        },
+                                    );
+                                });
+                            });
 
-                let running_count = self
-                    .containers
-                    .iter()
-                    .filter(|c| c.state == "running")
-                    .count();
-                ui.add(egui::Label::new(
-                    egui::RichText::new(format!("▶ Running ({})", running_count))
-                        .size(13.0)
-                        .strong(),
-                ));
-                ui.add_space(8.0);
-                self.filter_with_status_and_render("running", ui);
-                ui.separator();
-                ui.add_space(12.0);
+                        ui.add_space(SPACE_MD);
 
-                let exited_count = self
-                    .containers
-                    .iter()
-                    .filter(|c| c.state == "exited")
-                    .count();
-                ui.add(egui::Label::new(
-                    egui::RichText::new(format!("⏹ Exited ({})", exited_count))
-                        .size(13.0)
-                        .strong(),
-                ));
-                ui.add_space(8.0);
-                self.filter_with_status_and_render("exited", ui);
+                        let running_count = self
+                            .containers
+                            .iter()
+                            .filter(|c| c.state == "running")
+                            .count();
+                        ui.add(egui::Label::new(
+                            RichText::new(format!("Running ({running_count})"))
+                                .size(13.0)
+                                .strong()
+                                .color(Self::state_color("running")),
+                        ));
+                        ui.add_space(SPACE_SM);
+                        self.filter_with_status_and_render("running", ui);
+
+                        ui.add_space(SPACE_SM);
+                        ui.separator();
+                        ui.add_space(SPACE_MD);
+
+                        let exited_count = self
+                            .containers
+                            .iter()
+                            .filter(|c| c.state == "exited")
+                            .count();
+                        ui.add(egui::Label::new(
+                            RichText::new(format!("Exited ({exited_count})"))
+                                .size(13.0)
+                                .strong()
+                                .color(Self::state_color("exited")),
+                        ));
+                        ui.add_space(SPACE_SM);
+                        self.filter_with_status_and_render("exited", ui);
+                    });
             });
 
-        if self.selected_container != None {
+        if let Some(selected_id) = self.selected_container.as_ref() {
+            let selected_id = selected_id.clone();
+            let container_snapshot = self
+                .containers
+                .iter()
+                .find(|item| item.id == selected_id)
+                .map(|c| {
+                    (
+                        Self::container_name(c),
+                        c.image.clone(),
+                        c.state.clone(),
+                        c.id.clone(),
+                        c.command.clone(),
+                    )
+                });
+
             egui::SidePanel::new(Side::Right, "container_info")
                 .min_width(300.0)
-                .max_width(500.0)
+                .max_width(460.0)
                 .show(ctx, |ui| {
-                    let container_info_option = self
-                        .containers
-                        .iter()
-                        .find(|item| Some(item.id.clone()) == self.selected_container);
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.add_space(SPACE_SM);
+                            ui.heading(RichText::new("Container Details").size(20.0));
+                            ui.add_space(SPACE_XS);
+                            ui.separator();
+                            ui.add_space(SPACE_MD);
 
-                    ui.heading(egui::RichText::new("📦 Container Details").size(20.0));
-                    ui.separator();
-                    ui.add_space(12.0);
+                            if let Some((name, image, state, id, command)) = &container_snapshot {
+                                ui.horizontal(|ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(name)
+                                                .size(20.0)
+                                                .strong()
+                                                .color(Color32::from_rgb(223, 229, 240)),
+                                        )
+                                        .wrap(),
+                                    );
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            Self::render_state_badge(ui, state);
+                                        },
+                                    );
+                                });
 
-                    if let Some(container_info) = container_info_option {
-                        let container_id = container_info.id.clone();
-
-                        ui.vertical_centered(|ui| {
-                            let container_name = &container_info.names[0][1..];
-
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(container_name)
-                                        .size(20.0)
+                                ui.add_space(SPACE_MD);
+                                ui.label(
+                                    RichText::new("Information")
                                         .strong()
-                                        .color(egui::Color32::WHITE),
-                                )
-                                .wrap(),
-                            );
-                        });
-
-                        ui.add_space(16.0);
-
-                        ui.add(egui::Label::new(
-                            egui::RichText::new("Information")
-                                .strong()
-                                .size(14.0)
-                                .color(egui::Color32::LIGHT_YELLOW),
-                        ));
-                        ui.add_space(10.0);
-
-                        egui::Grid::new("container_info_grid")
-                            .num_columns(2)
-                            .spacing([12.0, 12.0])
-                            .min_col_width(80.0)
-                            .show(ui, |ui| {
-                                self.render_row_in_container_info(
-                                    ui,
-                                    "Image",
-                                    &container_info.image,
+                                        .size(14.0)
+                                        .color(Color32::from_rgb(187, 194, 208)),
                                 );
-                                self.render_row_in_container_info(
-                                    ui,
-                                    "State",
-                                    &container_info.state,
-                                );
+                                ui.add_space(SPACE_SM);
 
-                                let short_id = &container_info.id[0..12];
-                                self.render_row_in_container_info(ui, "ID", short_id);
+                                Frame::new()
+                                    .fill(Color32::from_rgb(41, 45, 53))
+                                    .corner_radius(CornerRadius::same(8))
+                                    .inner_margin(Margin::same(10))
+                                    .show(ui, |ui| {
+                                        ui.set_min_width(ui.available_width());
+                                        ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                                            egui::Grid::new("container_info_grid")
+                                                .num_columns(2)
+                                                .spacing([12.0, 10.0])
+                                                .min_col_width(96.0)
+                                                .show(ui, |ui| {
+                                                    self.render_row_in_container_info(
+                                                        ui, "Image", image,
+                                                    );
+                                                    self.render_row_in_container_info(
+                                                        ui, "State", state,
+                                                    );
+                                                    self.render_row_in_container_info(
+                                                        ui,
+                                                        "ID",
+                                                        &id[..12],
+                                                    );
+                                                    self.render_row_in_container_info(
+                                                        ui, "Command", command,
+                                                    );
+                                                });
+                                        });
+                                    });
 
-                                self.render_row_in_container_info(
-                                    ui,
-                                    "Command",
-                                    &container_info.command,
-                                );
-                            });
+                                ui.add_space(SPACE_MD);
+                                ui.separator();
+                                ui.add_space(SPACE_MD);
 
-                        ui.add_space(18.0);
-                        ui.separator();
-                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                            ui.horizontal(|ui| {
-                                let start_button = ui.add(
-                                    egui::Button::new(egui::RichText::new("Start").strong())
-                                        .min_size(vec2(90.0, 35.0))
-                                        .fill(egui::Color32::from_rgb(50, 150, 80)),
-                                );
-                                let stop_button = ui.add(
-                                    egui::Button::new(egui::RichText::new("Stop").strong())
-                                        .min_size(vec2(90.0, 35.0))
-                                        .fill(egui::Color32::from_rgb(180, 70, 70)),
-                                );
-                                if start_button.clicked() {
-                                    if let Some(selected_container_info) = &self.selected_container
-                                    {
-                                        requests::start_container(&selected_container_info)
-                                            .unwrap();
+                                ui.horizontal(|ui| {
+                                    let start_button = ui.add(
+                                        egui::Button::new(RichText::new("Start").strong())
+                                            .min_size(vec2(90.0, 34.0))
+                                            .fill(Color32::from_rgb(88, 103, 95)),
+                                    );
+                                    let stop_button = ui.add(
+                                        egui::Button::new(RichText::new("Stop").strong())
+                                            .min_size(vec2(90.0, 34.0))
+                                            .fill(Color32::from_rgb(112, 97, 97)),
+                                    );
+
+                                    if start_button.clicked() {
+                                        requests::start_container(&selected_id).unwrap();
                                     }
-                                }
-                                if stop_button.clicked() {
-                                    if let Some(selected_container_info) = &self.selected_container
-                                    {
-                                        requests::stop_container(&selected_container_info).unwrap();
+                                    if stop_button.clicked() {
+                                        requests::stop_container(&selected_id).unwrap();
                                     }
-                                }
-                            });
-                        });
+                                });
 
-                        ui.add_space(12.0);
+                                ui.add_space(SPACE_SM);
 
-                        let container_id_clone = container_id.clone();
-                        ui.horizontal(|ui| {
-                            if ui.button(egui::RichText::new("📋 Copy ID")).clicked() {
-                                ui.ctx().copy_text(container_id_clone.clone());
-                            }
-                            if ui.button(egui::RichText::new("🔄 Refresh")).clicked() {
-                                self.containers = requests::get_containers().unwrap();
+                                ui.horizontal(|ui| {
+                                    if ui.button("Copy ID").clicked() {
+                                        ui.ctx().copy_text(id.clone());
+                                    }
+                                    if ui.button("Refresh").clicked() {
+                                        self.refresh_containers();
+                                    }
+                                });
                             }
                         });
-                    }
                 });
         }
     }
