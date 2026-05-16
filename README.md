@@ -1,166 +1,96 @@
 # 🐾 Genet — A Lightweight Docker Desktop Built in Rust
 
-Genet is a native, low-latency Docker client written in Rust that communicates directly with `dockerd` over Unix sockets and renders a live-updating GUI using egui.  
-It implements real-time container state tracking and basic container control without relying on the Docker CLI or any external SDK.
+Genet is a native, low-latency Docker client written in Rust. It talks directly to `dockerd` over Unix sockets and renders a live-updating desktop UI with `egui`.
 
-This is not a wrapper around `docker ps`.  
-This is a true Docker Engine client.
+It is not a wrapper around `docker ps`.
+It is a small Docker Engine client with live container state, container controls, and continuous log streaming.
 
-<img width="1919" height="1043" alt="image" src="https://github.com/user-attachments/assets/ac43b8a9-0ffa-4dad-a4b1-fd3275a7dde8" />
-
-
----
-
-## Why Genet exists
-
-Most Docker GUIs are built on top of the Docker CLI or high-level SDKs.  
-Genet instead talks directly to the Docker Engine over its Unix socket, which allows:
-
-- Lower latency
-- Real-time streaming
-- Full control over protocol behavior
-- Deep insight into how Docker actually works
-
-Genet is both a real tool and a systems-level learning project.
+<img width="1919" height="1016" alt="Genet showing live container logs in the central panel" src="assets/screenshots/genet-logs.png" />
 
 ---
 
 ## Current Features
 
-- Live container list  
-  Containers automatically update when they start or stop, powered by Docker’s `/events` streaming API.
-
-- Direct Docker Engine communication  
-  Genet talks to `/var/run/docker.sock` using raw HTTP over Unix sockets.  
-  No Docker CLI, no shelling out, no SDKs.
-
-- Real-time container state  
-  Containers can be started and stopped, and state changes propagate instantly through the event stream.
-
-- Zero-lock UI architecture  
-  No `Mutex`.  
-  No shared mutable state.  
-  All background threads communicate with the UI using channels.
-
-- Native desktop UI  
-  Built with `egui` and `eframe` for a fast, lightweight, cross-platform experience.
-
----
-
-## How Genet talks to Docker
-
-Genet sends raw HTTP requests over a Unix socket:
-
-```
-GET /containers/json?all=1 HTTP/1.1
-GET /events HTTP/1.0
-POST /containers/{id}/start HTTP/1.1
-POST /containers/{id}/stop HTTP/1.1
-```
-
-Docker responds with:
-- JSON for queries  
-- Infinite JSON streams for events  
-
-For streaming endpoints (`/events`), Genet uses HTTP/1.0 to disable chunked encoding, producing clean newline-delimited JSON:
-
-```
-{json}
-{json}
-{json}
-```
-
-This makes it safe to parse events line-by-line in real time.
-
----
-
-## Event-driven UI model
-
-Docker events are converted into strongly typed Rust enums:
-
-```rust
-enum DockerEvents {
-    StartContainer { id: String },
-    StopContainer { id: String },
-}
-```
-
-The UI thread consumes them in `update()`:
-
-```rust
-while let Ok(event) = self.rx.try_recv() {
-    self.apply_event(event);
-}
-```
-
-The UI never blocks.  
-It simply reacts to incoming events and renders the new state.
+- Live container list grouped by state
+- Real-time container start/stop updates from Docker's `/events` stream
+- Start and stop controls for containers
+- Container detail panel with image, state, ID, and command
+- Continuous container logs in the central panel
+- Direct Docker Engine communication over `/var/run/docker.sock`
+- Channel-based background work with no shared mutable UI state
 
 ---
 
 ## User Interface
 
-Genet currently provides:
+Genet uses a three-panel layout:
 
-- A sidebar listing all containers  
-- Status grouping (Running / Exited)  
-- A container detail view  
-- Start and Stop controls  
+- Left panel: running and exited containers
+- Center panel: live logs for the selected container
+- Right panel: container details and actions
 
-All views update instantly when Docker state changes, even if those changes were triggered by another Docker client or the CLI.
-
----
-
-## Why this project is interesting
-
-Genet is not a CRUD app.
-
-It is a:
-- Streaming HTTP client  
-- Over Unix sockets  
-- With manual protocol handling  
-- Live event ingestion  
-- Concurrent UI state management  
-
-This is the same class of architecture used in:
-- Docker Desktop  
-- Kubernetes dashboards  
-- IDEs  
-- Infrastructure monitoring tools  
+Selecting a container starts a continuous log stream and keeps the central log view updated without blocking the UI.
 
 ---
 
-## Technology stack
+## How Genet Talks To Docker
 
-- Rust  
-- egui / eframe  
-- serde / serde_json  
-- Unix sockets  
-- mpsc channels  
-- Docker Engine API  
+Genet sends raw HTTP requests over Docker's Unix socket:
+
+```http
+GET /containers/json?all=1 HTTP/1.0
+GET /events HTTP/1.0
+GET /containers/{id}/logs?stdout=true&stderr=true&follow=true&tail=200 HTTP/1.0
+POST /containers/{id}/start HTTP/1.0
+POST /containers/{id}/stop HTTP/1.0
+```
+
+Docker responds with:
+
+- JSON for container list queries
+- Newline-delimited JSON for Docker events
+- Multiplexed stdout/stderr frames for container logs
+
+The UI thread polls channels in `update()`, so Docker streams can keep running in background threads while the interface stays responsive.
+
+---
+
+## Why Genet Exists
+
+Most Docker GUIs sit on top of the Docker CLI or high-level SDKs. Genet talks to the Docker Engine API directly, which makes it useful as both a real desktop tool and a systems-learning project.
+
+The interesting parts are:
+
+- Raw HTTP over Unix sockets
+- Streaming Docker endpoints
+- Manual log frame parsing
+- Event-driven UI updates
+- Rust channels for thread-to-UI communication
+
+---
+
+## Technology Stack
+
+- Rust
+- egui / eframe
+- serde / serde_json
+- Unix sockets
+- mpsc channels
+- Docker Engine API
 
 ---
 
 ## Roadmap
 
-Planned features:
-
-- Restart containers  
-- Live container logs (`/containers/{id}/logs?follow=1`)  
-- CPU and memory statistics (`/stats`)  
-- Container inspect view  
-- Image and volume management  
-- Multi-host support  
-- Windows named-pipe support  
+- Restart containers
+- CPU and memory statistics (`/stats`)
+- Container inspect view
+- Image and volume management
+- Multi-host support
+- Windows named-pipe support
 
 ---
 
 ## Author
 
-Built by **Parth Sharma** as a deep systems project exploring:
-
-- Concurrency  
-- Networking  
-- Streaming APIs  
-- GUI state synchronization  
-- Docker internals  
+Built by **Parth Sharma** as a deep systems project exploring concurrency, networking, streaming APIs, GUI state synchronization, and Docker internals.
