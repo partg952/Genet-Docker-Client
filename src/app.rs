@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::{sync::mpsc, time::Duration};
 
 use crate::core::events::DockerEvents;
 use crate::core::parser::ContainerInfo;
@@ -16,6 +16,8 @@ pub struct DockerApp {
     containers: Vec<ContainerInfo>,
     selected_container: Option<String>,
     rx: mpsc::Receiver<DockerEvents>,
+    logs: Vec<String>,
+    logs_rx: Option<mpsc::Receiver<String>>,
     theme_initialized: bool,
 }
 
@@ -26,6 +28,8 @@ impl DockerApp {
             containers: containers_list,
             selected_container: None,
             rx,
+            logs: Vec::new(),
+            logs_rx: None,
             theme_initialized: false,
         }
     }
@@ -60,6 +64,8 @@ impl DockerApp {
     }
 
     fn filter_with_status_and_render(&mut self, status: &str, ui: &mut Ui) {
+        let mut clicked_container = None;
+
         for container in self
             .containers
             .iter()
@@ -105,10 +111,22 @@ impl DockerApp {
                     .on_hover_text(Self::container_name(container));
             }
             if response.clicked() {
-                self.selected_container = Some(container.id.clone());
+                clicked_container = Some(container.id.clone());
             }
 
             ui.add_space(SPACE_XS);
+        }
+
+        if let Some(container_id) = clicked_container {
+            if self
+                .selected_container
+                .as_ref()
+                .is_none_or(|selected_id| selected_id != &container_id)
+            {
+                self.selected_container = Some(container_id.clone());
+                self.logs.clear();
+                self.logs_rx = Some(requests::get_logs(container_id));
+            }
         }
     }
 
@@ -164,6 +182,19 @@ impl DockerApp {
 impl eframe::App for DockerApp {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         self.init_theme(ctx);
+
+        if let Some(logs_rx) = self.logs_rx.as_ref() {
+            while let Ok(line) = logs_rx.try_recv() {
+                self.logs.push(line);
+                if self.logs.len() > 1000 {
+                    self.logs.drain(0..100);
+                }
+            }
+        }
+
+        if self.logs_rx.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(200));
+        }
 
         while let Ok(event) = self.rx.try_recv() {
             match event {
@@ -385,5 +416,26 @@ impl eframe::App for DockerApp {
                         });
                 });
         }
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.add_space(SPACE_SM);
+            ui.label(RichText::new("Logs").strong().size(18.0));
+            ui.add_space(SPACE_SM);
+
+            if self.selected_container.is_none() {
+                ui.label(
+                    RichText::new("Select a container").color(Color32::from_rgb(166, 173, 188)),
+                );
+                return;
+            }
+
+            egui::ScrollArea::vertical()
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    for line in &self.logs {
+                        ui.label(RichText::new(line).monospace().size(12.0));
+                    }
+                });
+        });
     }
 }
