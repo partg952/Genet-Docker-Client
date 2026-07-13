@@ -10,7 +10,6 @@ impl Socket {
         let mut socket_connection = UnixStream::connect("/var/run/docker.sock")?;
         Ok(Socket { socket_connection })
     }
-
     pub fn write_request(&mut self, request: &[u8]) -> Result<(), Box<dyn Error>> {
         self.socket_connection.write_all(request)?;
         Ok(())
