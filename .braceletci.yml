@@ -1,0 +1,6 @@
+version: "1"
+jobs:
+  build:
+    image: "rust:latest"
+    steps:
+      - run : "cargo build"
